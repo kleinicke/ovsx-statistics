@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-background: oklch(100% 0 0);
+	--color-foreground: oklch(9% 0.01 264);
+	--color-muted: oklch(96% 0.005 264);
+	--color-muted-foreground: oklch(45% 0.02 264);
+	--color-border: oklch(90% 0.005 264);
+	--color-card: oklch(100% 0 0);
+	--color-card-foreground: oklch(9% 0.01 264);
+	--color-primary: oklch(18% 0.01 264);
+	--color-primary-foreground: oklch(98% 0 0);
+	--color-accent: oklch(96% 0.005 264);
+	--color-accent-foreground: oklch(18% 0.01 264);
+	--color-emerald: oklch(60% 0.15 162);
+	--color-amber: oklch(75% 0.15 75);
+	--color-rose: oklch(60% 0.2 15);
+	--radius: 0.5rem;
+}
+
+.dark {
+	--color-background: oklch(9% 0.01 264);
+	--color-foreground: oklch(98% 0 0);
+	--color-muted: oklch(15% 0.01 264);
+	--color-muted-foreground: oklch(64% 0.02 264);
+	--color-border: oklch(20% 0.01 264);
+	--color-card: oklch(12% 0.01 264);
+	--color-card-foreground: oklch(98% 0 0);
+	--color-primary: oklch(98% 0 0);
+	--color-primary-foreground: oklch(18% 0.01 264);
+	--color-accent: oklch(15% 0.01 264);
+	--color-accent-foreground: oklch(98% 0 0);
+}
+
+*,
+*::before,
+*::after {
+	border-color: var(--color-border);
+}
+
+body {
+	background-color: var(--color-background);
+	color: var(--color-foreground);
+	font-family: system-ui, sans-serif;
+}
