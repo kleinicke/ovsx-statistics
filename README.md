@@ -1,42 +1,68 @@
-# sv
+# Extension Downloads
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Tracks Open VSX download counts and optional VS Code Marketplace install counts over time.
 
-## Creating a project
+## Architecture
 
-If you're seeing this, you've probably already done this step. Congrats!
+- GitHub Actions runs the scraper every day at 02:00 UTC.
+- The scraper writes snapshots to Turso using Drizzle's libSQL adapter.
+- The scraper exports `static/latest.json`, then commits that file back to the repo.
+- Cloudflare Pages serves the SvelteKit app as a static SPA.
+- Extension detail pages call a Cloudflare Worker at `/api/extension`, which reads history from Turso.
+
+## Environment
+
+For local libSQL/SQLite development:
 
 ```sh
-# create a new project
-npx sv create my-app
+DATABASE_URL=file:local.db
 ```
 
-To recreate this project with the same configuration:
+For Turso:
 
 ```sh
-# recreate this project
-pnpm dlx sv@0.16.1 create --template minimal --types ts --add tailwindcss="plugins:none" drizzle="database:sqlite+sqlite:better-sqlite3" sveltekit-adapter="adapter:node" --no-download-check --install pnpm /opt/extension_downloads
+TURSO_DATABASE_URL=libsql://your-database-org.turso.io
+TURSO_AUTH_TOKEN=...
 ```
+
+Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as GitHub Actions secrets before enabling the scheduled workflow.
 
 ## Developing
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+pnpm install
+pnpm dev
 ```
 
-## Building
-
-To create a production version of your app:
+The index page reads `static/latest.json`. Generate it from the current database with:
 
 ```sh
-npm run build
+pnpm export:latest
 ```
 
-You can preview the production build with `npm run preview`.
+Run the full daily job locally with:
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+```sh
+pnpm scrape
+```
+
+## Database
+
+```sh
+pnpm db:generate
+pnpm db:migrate
+```
+
+## Deploying
+
+Cloudflare Pages can build the static app with:
+
+```sh
+pnpm build
+```
+
+Deploy the Worker in `worker/` and route `/api/extension` to it. Start from `worker/wrangler.toml.example` and set `TURSO_AUTH_TOKEN` with:
+
+```sh
+wrangler secret put TURSO_AUTH_TOKEN
+```

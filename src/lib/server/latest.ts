@@ -1,9 +1,9 @@
-import type { PageServerLoad } from './$types';
-import { db } from '$lib/server/db/index.js';
-import { extensions, extensionTags, snapshots } from '$lib/server/db/schema.js';
 import { desc, eq, sql } from 'drizzle-orm';
+import { db } from './db/index.js';
+import { extensions, extensionTags, snapshots } from './db/schema.js';
+import type { LatestJson } from '../types.js';
 
-export const load: PageServerLoad = async () => {
+export async function getLatestRanking(): Promise<LatestJson> {
 	const latestDate = await db
 		.select({ date: snapshots.date })
 		.from(snapshots)
@@ -12,7 +12,7 @@ export const load: PageServerLoad = async () => {
 		.get();
 
 	if (!latestDate) {
-		return { rows: [], latestDate: null };
+		return { rows: [], latestDate: null, generatedAt: new Date().toISOString() };
 	}
 
 	const date = latestDate.date;
@@ -51,13 +51,6 @@ export const load: PageServerLoad = async () => {
 		prevMap = new Map(prev.map((p) => [p.extensionId, p.downloadCount]));
 	}
 
-	const rows = current.map((row, index) => ({
-		rank: index + 1,
-		...row,
-		delta: prevMap.has(row.id) ? row.downloadCount - prevMap.get(row.id)! : null
-	}));
-
-	// Build tag index for the displayed extensions (only those with stored tags)
 	const tagRows = await db
 		.select({ extensionId: extensionTags.extensionId, tag: extensionTags.tag })
 		.from(extensionTags)
@@ -70,8 +63,16 @@ export const load: PageServerLoad = async () => {
 		tagsByExtension.set(extensionId, list);
 	}
 
+	const rows = current.map((row, index) => ({
+		rank: index + 1,
+		...row,
+		delta: prevMap.has(row.id) ? row.downloadCount - prevMap.get(row.id)! : null,
+		tags: tagsByExtension.get(row.id) ?? []
+	}));
+
 	return {
-		rows: rows.map((r) => ({ ...r, tags: tagsByExtension.get(r.id) ?? [] })),
-		latestDate: date
+		rows,
+		latestDate: date,
+		generatedAt: new Date().toISOString()
 	};
-};
+}

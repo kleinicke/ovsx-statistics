@@ -1,4 +1,6 @@
+autoInstallPeers: false
+allowBuilds:
+  esbuild: true
 onlyBuiltDependencies:
   - '@tailwindcss/oxide'
-  - better-sqlite3
   - esbuild

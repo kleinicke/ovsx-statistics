@@ -1,0 +1,10 @@
+name = "extension-downloads-api"
+main = "index.ts"
+compatibility_date = "2026-06-30"
+
+[vars]
+ALLOWED_ORIGIN = "https://your-pages-site.pages.dev"
+TURSO_DATABASE_URL = "libsql://your-database-org.turso.io"
+
+# Set the auth token as a secret:
+# wrangler secret put TURSO_AUTH_TOKEN
