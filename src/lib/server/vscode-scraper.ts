@@ -1,16 +1,24 @@
 import { db } from './db/index.js';
 import { extensions, vsCodeSnapshots } from './db/schema.js';
-import { and, eq, isNotNull, isNull, inArray } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, inArray, lt, or, sql } from 'drizzle-orm';
+import { chunk, fetchJson } from './http.js';
 
 const VSCODE_API = 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery';
 const BATCH_SIZE = 100;
+const ROW_CHUNK = 400;
+const RECHECK_AFTER_DAYS = 30; // retry discovery for unmatched extensions this often
+
+interface GalleryExtension {
+	publisher: { publisherName: string };
+	extensionName: string;
+	statistics?: { statisticName: string; value: number }[];
+}
 
 async function fetchInstalls(vsCodeIds: string[]): Promise<Map<string, number>> {
 	const result = new Map<string, number>();
 
-	for (let i = 0; i < vsCodeIds.length; i += BATCH_SIZE) {
-		const batch = vsCodeIds.slice(i, i + BATCH_SIZE);
-		const res = await fetch(VSCODE_API, {
+	for (const batch of chunk(vsCodeIds, BATCH_SIZE)) {
+		const data = await fetchJson<{ results?: { extensions?: GalleryExtension[] }[] }>(VSCODE_API, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
@@ -27,14 +35,9 @@ async function fetchInstalls(vsCodeIds: string[]): Promise<Map<string, number>> 
 			})
 		});
 
-		if (!res.ok) throw new Error(`VS Code API failed: ${res.status}`);
-		const data = await res.json();
-
 		for (const ext of data.results?.[0]?.extensions ?? []) {
 			const id = `${ext.publisher.publisherName}.${ext.extensionName}`;
-			const installs = ext.statistics?.find(
-				(s: { statisticName: string }) => s.statisticName === 'install'
-			)?.value ?? 0;
+			const installs = ext.statistics?.find((s) => s.statisticName === 'install')?.value ?? 0;
 			result.set(id.toLowerCase(), installs);
 		}
 	}
@@ -42,43 +45,47 @@ async function fetchInstalls(vsCodeIds: string[]): Promise<Map<string, number>> 
 	return result;
 }
 
-// One-time discovery: try namespace.name as the VS Code ID for extensions that
-// don't have one yet. Stores vscode_id and the first install snapshot if found.
-export async function discoverVscodeIds(
-	extensionDbIds: number[]
-): Promise<{ discovered: number; checked: number }> {
+// Discovery: try namespace.name as the VS Code ID for extensions without one.
+// Unmatched extensions are stamped with vscode_checked_at and retried after
+// RECHECK_AFTER_DAYS, so each run only queries new or stale candidates.
+export async function discoverVscodeIds(): Promise<{ discovered: number; checked: number }> {
+	const cutoff = new Date(Date.now() - RECHECK_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
 	const candidates = await db
-		.select()
+		.select({ id: extensions.id, namespace: extensions.namespace, name: extensions.name })
 		.from(extensions)
-		.where(and(isNull(extensions.vsCodeId), inArray(extensions.id, extensionDbIds)))
+		.where(
+			and(
+				isNull(extensions.vsCodeId),
+				or(isNull(extensions.vsCodeCheckedAt), lt(extensions.vsCodeCheckedAt, cutoff))
+			)
+		)
 		.all();
 
 	if (candidates.length === 0) return { discovered: 0, checked: 0 };
 
-	const candidateIds = candidates.map((e) => `${e.namespace}.${e.name}`);
-	const found = await fetchInstalls(candidateIds);
+	const found = await fetchInstalls(candidates.map((e) => `${e.namespace}.${e.name}`));
+	const checkedAt = new Date().toISOString();
 
-	const now = new Date();
-	const date = now.toISOString().slice(0, 10);
-	const scrapedAt = now.toISOString();
-	let discovered = 0;
-
-	for (const ext of candidates) {
-		const key = `${ext.namespace}.${ext.name}`.toLowerCase();
-		if (!found.has(key)) continue;
-
-		await db.update(extensions).set({ vsCodeId: `${ext.namespace}.${ext.name}` }).where(eq(extensions.id, ext.id));
-		await db.insert(vsCodeSnapshots).values({
-			extensionId: ext.id,
-			date,
-			scrapedAt,
-			installCount: found.get(key)!
-		});
-		discovered++;
+	// Stamp every candidate as checked, then set vscode_id on the matches.
+	// The install snapshot itself is taken by scrapeVscodeInstalls right after.
+	for (const c of chunk(candidates, ROW_CHUNK)) {
+		await db
+			.update(extensions)
+			.set({ vsCodeCheckedAt: checkedAt })
+			.where(inArray(extensions.id, c.map((e) => e.id)));
 	}
 
-	console.log(`[vscode-discover] ${discovered}/${candidates.length} found on VS Code Marketplace`);
-	return { discovered, checked: candidates.length };
+	const matches = candidates.filter((e) => found.has(`${e.namespace}.${e.name}`.toLowerCase()));
+	for (const ext of matches) {
+		await db
+			.update(extensions)
+			.set({ vsCodeId: `${ext.namespace}.${ext.name}` })
+			.where(eq(extensions.id, ext.id));
+	}
+
+	console.log(`[vscode-discover] ${matches.length}/${candidates.length} found on VS Code Marketplace`);
+	return { discovered: matches.length, checked: candidates.length };
 }
 
 // Daily scrape: fetch install counts for all extensions with a known vscode_id.
@@ -91,39 +98,34 @@ export async function scrapeVscodeInstalls(): Promise<{ scraped: number; errors:
 
 	if (known.length === 0) return { scraped: 0, errors: [] };
 
-	const ids = known.map((e) => e.vsCodeId!);
-	const counts = await fetchInstalls(ids);
+	const counts = await fetchInstalls(known.map((e) => e.vsCodeId!));
 
 	const now = new Date();
 	const date = now.toISOString().slice(0, 10);
 	const scrapedAt = now.toISOString();
-	let scraped = 0;
 	const errors: string[] = [];
 
+	const rows: (typeof vsCodeSnapshots.$inferInsert)[] = [];
 	for (const ext of known) {
 		const count = counts.get(ext.vsCodeId!.toLowerCase());
 		if (count === undefined) {
 			errors.push(`${ext.vsCodeId}: not returned`);
 			continue;
 		}
-
-		const existing = await db
-			.select({ id: vsCodeSnapshots.id })
-			.from(vsCodeSnapshots)
-			.where(and(eq(vsCodeSnapshots.extensionId, ext.id), eq(vsCodeSnapshots.date, date)))
-			.get();
-
-		if (existing) {
-			await db
-				.update(vsCodeSnapshots)
-				.set({ installCount: count, scrapedAt })
-				.where(eq(vsCodeSnapshots.id, existing.id));
-		} else {
-			await db.insert(vsCodeSnapshots).values({ extensionId: ext.id, date, scrapedAt, installCount: count });
-		}
-		scraped++;
+		rows.push({ extensionId: ext.id, date, scrapedAt, installCount: count });
 	}
 
-	console.log(`[vscode-scraper] Scraped ${scraped} extensions. Errors: ${errors.length}`);
-	return { scraped, errors };
+	// Upsert so a same-day rerun updates instead of duplicating
+	for (const c of chunk(rows, ROW_CHUNK)) {
+		await db
+			.insert(vsCodeSnapshots)
+			.values(c)
+			.onConflictDoUpdate({
+				target: [vsCodeSnapshots.extensionId, vsCodeSnapshots.date],
+				set: { installCount: sql`excluded.install_count`, scrapedAt: sql`excluded.scraped_at` }
+			});
+	}
+
+	console.log(`[vscode-scraper] Scraped ${rows.length} extensions. Errors: ${errors.length}`);
+	return { scraped: rows.length, errors };
 }

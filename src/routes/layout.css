@@ -15,6 +15,7 @@
 	--color-emerald: oklch(60% 0.15 162);
 	--color-amber: oklch(75% 0.15 75);
 	--color-rose: oklch(60% 0.2 15);
+	--color-chart: oklch(50% 0.2 240);
 	--radius: 0.5rem;
 }
 
@@ -30,6 +31,7 @@
 	--color-primary-foreground: oklch(18% 0.01 264);
 	--color-accent: oklch(15% 0.01 264);
 	--color-accent-foreground: oklch(98% 0 0);
+	--color-chart: oklch(70% 0.15 240);
 }
 
 *,

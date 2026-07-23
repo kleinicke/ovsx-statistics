@@ -78,8 +78,8 @@ async function fetchMeta(namespace: string, name: string): Promise<OpenVsxMeta |
 
 async function upsertMeta(db: Client, extensionId: number, meta: OpenVsxMeta) {
 	await db.execute({
-		sql: 'update extensions set repo_url = ?, homepage_url = ?, bugs_url = ? where id = ?',
-		args: [meta.repoUrl, meta.homepageUrl, meta.bugsUrl, extensionId]
+		sql: 'update extensions set repo_url = ?, homepage_url = ?, bugs_url = ?, icon_url = ?, description = ? where id = ?',
+		args: [meta.repoUrl, meta.homepageUrl, meta.bugsUrl, meta.iconUrl, meta.description, extensionId]
 	});
 
 	const allTags = [...new Set([...meta.tags, ...meta.categories])];
@@ -105,6 +105,8 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 				display_name as displayName,
 				pinned,
 				vscode_id as vsCodeId,
+				icon_url as iconUrl,
+				description,
 				repo_url as repoUrl,
 				homepage_url as homepageUrl,
 				bugs_url as bugsUrl
@@ -119,8 +121,19 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 	if (!ext) return null;
 	ext.pinned = Boolean(ext.pinned);
 
+	// The daily scrape stores icon/description, so metadata is usually already
+	// on hand — only block on the live Open VSX call when we have nothing yet,
+	// and refresh stored metadata in the background otherwise.
+	const hasStoredMeta = ext.iconUrl !== null || ext.description !== null;
+	const metaPromise: Promise<OpenVsxMeta | null> = hasStoredMeta
+		? Promise.resolve(null)
+		: fetchMeta(namespace, name);
+	if (hasStoredMeta) {
+		ctx.waitUntil(fetchMeta(namespace, name).then((m) => (m ? upsertMeta(db, ext.id, m) : undefined)));
+	}
+
 	const [meta, historyResult, vsCodeResult, releaseResult, tagResult] = await Promise.all([
-		fetchMeta(namespace, name),
+		metaPromise,
 		db.execute({
 			sql: `
 				select date, scraped_at as scrapedAt, download_count as downloadCount, version
@@ -172,8 +185,8 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 		latest: history.at(-1) ?? null,
 		latestVsCode: vsCodeHistory.at(-1) ?? null,
 		tags,
-		iconUrl: meta?.iconUrl ?? null,
-		description: meta?.description ?? null,
+		iconUrl: meta?.iconUrl ?? ext.iconUrl ?? null,
+		description: meta?.description ?? ext.description ?? null,
 		repoUrl: meta?.repoUrl ?? ext.repoUrl ?? null,
 		homepageUrl: meta?.homepageUrl ?? ext.homepageUrl ?? null,
 		bugsUrl: meta?.bugsUrl ?? ext.bugsUrl ?? null

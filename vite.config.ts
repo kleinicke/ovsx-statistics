@@ -4,6 +4,17 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	server: {
+		// Detail pages call /api/extension, served by the Cloudflare Worker in
+		// production. In dev, run `wrangler dev` in worker/ (defaults to :8787)
+		// or point API_PROXY_TARGET at a deployed Worker.
+		proxy: {
+			'/api': {
+				target: process.env.API_PROXY_TARGET ?? 'http://localhost:8787',
+				changeOrigin: true
+			}
+		}
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({

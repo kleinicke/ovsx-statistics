@@ -18,6 +18,9 @@
 			: null
 	);
 
+	// VS Code snapshots start later than Open VSX ones, so pair them by date
+	const vsCodeByDate = $derived(new Map(data.vsCodeHistory.map((v) => [v.date, v])));
+
 	const openVsxUrl = $derived(`https://open-vsx.org/extension/${data.ext.namespace}/${data.ext.name}`);
 	const vsCodeUrl = $derived(
 		data.ext.vsCodeId
@@ -25,6 +28,15 @@
 			: null
 	);
 </script>
+
+<svelte:head>
+	<title>{data.ext.displayName} — download statistics</title>
+	<meta
+		name="description"
+		content={data.description ??
+			`Daily download and install history for ${data.ext.namespace}.${data.ext.name}.`}
+	/>
+</svelte:head>
 
 <div class="space-y-8">
 	<!-- Back -->
@@ -211,8 +223,8 @@
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-[var(--color-border)]">
-						{#each [...data.history].reverse() as snap, i}
-							{@const vsSnap = data.ext.vsCodeId ? [...data.vsCodeHistory].reverse()[i] : null}
+						{#each [...data.history].reverse() as snap (snap.date)}
+							{@const vsSnap = data.ext.vsCodeId ? (vsCodeByDate.get(snap.date) ?? null) : null}
 							<tr class="hover:bg-[var(--color-accent)] transition-colors">
 								<td class="px-4 py-2.5 font-mono text-xs text-[var(--color-muted-foreground)]">
 									{snap.scrapedAt.slice(0, 19).replace('T', ' ')}

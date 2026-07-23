@@ -1,9 +1,12 @@
 import { db } from './db/index.js';
 import { extensions, snapshots, versionEvents } from './db/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { chunk, fetchJson, HttpError } from './http.js';
 
 const OPENVSX_API = 'https://open-vsx.org/api';
 const PAGE_SIZE = 100;
+const ROW_CHUNK = 400; // rows per multi-row insert — stays well under SQLite's variable limit
+const BATCH_CHUNK = 100; // statements per db.batch round trip
 
 // Extensions that are always tracked regardless of rank
 const PINNED = [
@@ -12,122 +15,77 @@ const PINNED = [
 	{ namespace: 'janosh', name: 'matterviz' }
 ];
 
-interface OpenVsxExtension {
+interface ScrapedExtension {
 	namespace: string;
 	name: string;
 	displayName: string;
 	version: string;
 	downloadCount: number;
+	iconUrl: string | null;
+	description: string | null;
+}
+
+interface SearchEntry {
+	namespace: string;
+	name: string;
+	displayName?: string;
+	version: string;
+	downloadCount?: number;
+	description?: string;
+	files?: { icon?: string };
+}
+
+const key = (e: { namespace: string; name: string }) => `${e.namespace}/${e.name}`;
+
+function normalize(ext: SearchEntry): ScrapedExtension {
+	return {
+		namespace: ext.namespace,
+		name: ext.name,
+		displayName: ext.displayName ?? ext.name,
+		version: ext.version,
+		downloadCount: ext.downloadCount ?? 0,
+		iconUrl: ext.files?.icon ?? null,
+		description: ext.description ?? null
+	};
 }
 
 // Paginate until the API returns an empty page (hard limit ~10k).
-// No arbitrary TOP_COUNT — we get everything the API exposes.
-async function fetchAllExtensions(): Promise<OpenVsxExtension[]> {
-	const results: OpenVsxExtension[] = [];
+// Deduped by namespace/name since entries can shift between pages while paginating.
+async function fetchAllExtensions(): Promise<ScrapedExtension[]> {
+	const byKey = new Map<string, ScrapedExtension>();
 	let offset = 0;
 
 	while (true) {
 		const url = `${OPENVSX_API}/-/search?size=${PAGE_SIZE}&offset=${offset}&sortBy=downloadCount&sortOrder=desc`;
-		const res = await fetch(url);
-		if (!res.ok) throw new Error(`Search failed at offset ${offset}: ${res.status}`);
-		const data = await res.json();
-		const batch: unknown[] = data.extensions ?? [];
+		const data = await fetchJson<{ extensions?: SearchEntry[] }>(url);
+		const batch = data.extensions ?? [];
 
-		for (const ext of batch as OpenVsxExtension[]) {
-			results.push({
-				namespace: ext.namespace,
-				name: ext.name,
-				displayName: (ext as { displayName?: string }).displayName ?? ext.name,
-				version: ext.version,
-				downloadCount: (ext as { downloadCount?: number }).downloadCount ?? 0
-			});
+		for (const ext of batch) {
+			if (!byKey.has(key(ext))) byKey.set(key(ext), normalize(ext));
 		}
 
 		if (batch.length < PAGE_SIZE) break; // last page or API limit reached
 		offset += PAGE_SIZE;
 	}
 
-	return results;
+	return [...byKey.values()];
 }
 
-async function fetchExtension(namespace: string, name: string): Promise<OpenVsxExtension | null> {
-	const res = await fetch(`${OPENVSX_API}/${namespace}/${name}`);
-	if (!res.ok) return null;
-	const data = await res.json();
-	return {
-		namespace: data.namespace,
-		name: data.name,
-		displayName: data.displayName ?? data.name,
-		version: data.version,
-		downloadCount: data.downloadCount ?? 0
-	};
-}
-
-async function upsertExtension(
-	namespace: string,
-	name: string,
-	displayName: string,
-	pinned: boolean
-): Promise<number> {
-	const existing = await db
-		.select()
-		.from(extensions)
-		.where(and(eq(extensions.namespace, namespace), eq(extensions.name, name)))
-		.get();
-
-	if (existing) {
-		if (existing.pinned !== pinned && pinned) {
-			await db.update(extensions).set({ pinned: true }).where(eq(extensions.id, existing.id));
-		}
-		return existing.id;
+async function fetchExtension(namespace: string, name: string): Promise<ScrapedExtension | null> {
+	try {
+		const data = await fetchJson<SearchEntry>(`${OPENVSX_API}/${namespace}/${name}`);
+		return normalize(data);
+	} catch (e) {
+		if (e instanceof HttpError && e.status === 404) return null;
+		throw e;
 	}
-
-	const result = await db
-		.insert(extensions)
-		.values({ namespace, name, displayName, pinned })
-		.returning({ id: extensions.id });
-	return result[0].id;
 }
 
-async function recordSnapshot(
-	extensionId: number,
-	date: string,
-	scrapedAt: string,
-	downloadCount: number,
-	version: string
-): Promise<void> {
-	const existing = await db
-		.select()
-		.from(snapshots)
-		.where(and(eq(snapshots.extensionId, extensionId), eq(snapshots.date, date)))
-		.get();
-
-	if (existing) {
-		// Update in case the scraper runs twice on the same day
-		await db
-			.update(snapshots)
-			.set({ downloadCount, version, scrapedAt })
-			.where(eq(snapshots.id, existing.id));
-		return;
-	}
-
-	// Check for version change vs most recent previous snapshot before inserting
-	const prev = await db.query.snapshots.findFirst({
-		where: and(eq(snapshots.extensionId, extensionId)),
-		orderBy: (s, { desc }) => [desc(s.date)],
-		columns: { version: true, date: true }
-	});
-
-	await db.insert(snapshots).values({ extensionId, date, scrapedAt, downloadCount, version });
-
-	if (prev && prev.date !== date && prev.version !== version) {
-		await db.insert(versionEvents).values({
-			extensionId,
-			date,
-			detectedAt: scrapedAt,
-			oldVersion: prev.version,
-			newVersion: version
-		});
+// db.batch requires a non-empty tuple; centralize the chunking and cast here.
+type Statement = Parameters<typeof db.batch>[0][number];
+async function runBatched(statements: Statement[]): Promise<void> {
+	for (const c of chunk(statements, BATCH_CHUNK)) {
+		await db.batch(c as unknown as [Statement, ...Statement[]]);
 	}
 }
 
@@ -136,43 +94,146 @@ export async function runScrape(): Promise<{ scraped: number; errors: string[] }
 	const date = now.toISOString().slice(0, 10);
 	const scrapedAt = now.toISOString();
 	const errors: string[] = [];
-	let scraped = 0;
 
 	console.log(`[scraper] Starting scrape for ${date}`);
 
-	const topExts = await fetchAllExtensions();
-	console.log(`[scraper] Fetched ${topExts.length} extensions from API`);
-	const pinnedKeys = new Set(PINNED.map((p) => `${p.namespace}/${p.name}`));
+	// Fetch everything up front — DB writes only start after a fully successful fetch,
+	// so a mid-pagination failure never leaves a half-written day behind.
+	const scraped = await fetchAllExtensions();
+	console.log(`[scraper] Fetched ${scraped.length} extensions from API`);
 
-	for (const ext of topExts) {
-		try {
-			const isPinned = pinnedKeys.has(`${ext.namespace}/${ext.name}`);
-			const id = await upsertExtension(ext.namespace, ext.name, ext.displayName, isPinned);
-			await recordSnapshot(id, date, scrapedAt, ext.downloadCount, ext.version);
-			scraped++;
-		} catch (e) {
-			errors.push(`${ext.namespace}/${ext.name}: ${e}`);
-		}
-	}
-
-	// Fetch pinned extensions not already in the top 200
-	const topKeys = new Set(topExts.map((e) => `${e.namespace}/${e.name}`));
+	// Fetch pinned extensions that didn't make the search results
+	const pinnedKeys = new Set(PINNED.map(key));
+	const scrapedKeys = new Set(scraped.map(key));
 	for (const pinned of PINNED) {
-		if (topKeys.has(`${pinned.namespace}/${pinned.name}`)) continue;
+		if (scrapedKeys.has(key(pinned))) continue;
 		try {
 			const ext = await fetchExtension(pinned.namespace, pinned.name);
-			if (!ext) {
-				errors.push(`${pinned.namespace}/${pinned.name}: not found`);
-				continue;
-			}
-			const id = await upsertExtension(ext.namespace, ext.name, ext.displayName, true);
-			await recordSnapshot(id, date, scrapedAt, ext.downloadCount, ext.version);
-			scraped++;
+			if (ext) scraped.push(ext);
+			else errors.push(`${key(pinned)}: not found`);
 		} catch (e) {
-			errors.push(`${pinned.namespace}/${pinned.name}: ${e}`);
+			errors.push(`${key(pinned)}: ${e}`);
 		}
 	}
 
-	console.log(`[scraper] Done. Scraped ${scraped} extensions. Errors: ${errors.length}`);
-	return { scraped, errors };
+	// Insert extensions that are new since the last run
+	const existing = await db
+		.select({
+			id: extensions.id,
+			namespace: extensions.namespace,
+			name: extensions.name,
+			displayName: extensions.displayName,
+			pinned: extensions.pinned,
+			iconUrl: extensions.iconUrl,
+			description: extensions.description
+		})
+		.from(extensions)
+		.all();
+	const existingByKey = new Map(existing.map((e) => [key(e), e]));
+
+	const newRows = scraped
+		.filter((e) => !existingByKey.has(key(e)))
+		.map((e) => ({
+			namespace: e.namespace,
+			name: e.name,
+			displayName: e.displayName,
+			pinned: pinnedKeys.has(key(e)),
+			iconUrl: e.iconUrl,
+			description: e.description
+		}));
+	for (const c of chunk(newRows, ROW_CHUNK)) {
+		await db.insert(extensions).values(c);
+	}
+	if (newRows.length > 0) console.log(`[scraper] Inserted ${newRows.length} new extensions`);
+
+	// Refresh metadata that changed for known extensions
+	const updates: Statement[] = [];
+	for (const e of scraped) {
+		const ex = existingByKey.get(key(e));
+		if (!ex) continue;
+		const pinned = ex.pinned || pinnedKeys.has(key(e));
+		if (
+			ex.displayName !== e.displayName ||
+			ex.iconUrl !== e.iconUrl ||
+			ex.description !== e.description ||
+			ex.pinned !== pinned
+		) {
+			updates.push(
+				db
+					.update(extensions)
+					.set({ displayName: e.displayName, iconUrl: e.iconUrl, description: e.description, pinned })
+					.where(eq(extensions.id, ex.id))
+			);
+		}
+	}
+	await runBatched(updates);
+
+	// Re-select for ids of freshly inserted rows
+	const allExtensions = await db
+		.select({ id: extensions.id, namespace: extensions.namespace, name: extensions.name })
+		.from(extensions)
+		.all();
+	const idByKey = new Map(allExtensions.map((e) => [key(e), e.id]));
+
+	// Previous latest version per extension, for version-change detection
+	const prevRows = await db.all<{ extensionId: number; version: string }>(sql`
+		select s.extension_id as extensionId, s.version as version
+		from snapshots s
+		join (
+			select extension_id, max(date) as d
+			from snapshots
+			where date < ${date}
+			group by extension_id
+		) m on m.extension_id = s.extension_id and m.d = s.date
+	`);
+	const prevVersion = new Map(prevRows.map((r) => [r.extensionId, r.version]));
+
+	// Upsert today's snapshots (update in case the scraper runs twice on the same day)
+	const snapshotRows = scraped.map((e) => ({
+		extensionId: idByKey.get(key(e))!,
+		date,
+		scrapedAt,
+		downloadCount: e.downloadCount,
+		version: e.version
+	}));
+	for (const c of chunk(snapshotRows, ROW_CHUNK)) {
+		await db
+			.insert(snapshots)
+			.values(c)
+			.onConflictDoUpdate({
+				target: [snapshots.extensionId, snapshots.date],
+				set: {
+					downloadCount: sql`excluded.download_count`,
+					version: sql`excluded.version`,
+					scrapedAt: sql`excluded.scraped_at`
+				}
+			});
+	}
+
+	// Record version changes vs the most recent previous snapshot
+	const events = snapshotRows
+		.filter((r) => {
+			const prev = prevVersion.get(r.extensionId);
+			return prev !== undefined && prev !== r.version;
+		})
+		.map((r) => ({
+			extensionId: r.extensionId,
+			date,
+			detectedAt: scrapedAt,
+			oldVersion: prevVersion.get(r.extensionId)!,
+			newVersion: r.version
+		}));
+	for (const c of chunk(events, ROW_CHUNK)) {
+		await db
+			.insert(versionEvents)
+			.values(c)
+			.onConflictDoUpdate({
+				target: [versionEvents.extensionId, versionEvents.date],
+				set: { newVersion: sql`excluded.new_version`, detectedAt: sql`excluded.detected_at` }
+			});
+	}
+	if (events.length > 0) console.log(`[scraper] Recorded ${events.length} version changes`);
+
+	console.log(`[scraper] Done. Scraped ${snapshotRows.length} extensions. Errors: ${errors.length}`);
+	return { scraped: snapshotRows.length, errors };
 }

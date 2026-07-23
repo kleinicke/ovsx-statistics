@@ -5,10 +5,11 @@ Tracks Open VSX download counts and optional VS Code Marketplace install counts 
 ## Architecture
 
 - GitHub Actions runs the scraper every day at 02:00 UTC.
-- The scraper writes snapshots to Turso using Drizzle's libSQL adapter.
-- The scraper exports `static/latest.json`, then commits that file back to the repo.
+- The scraper fetches all Open VSX extensions (with retries), batch-writes snapshots to Turso, discovers VS Code Marketplace IDs, and records install counts.
+- The scraper exports `static/latest.json` (top 500 + pinned, with icons, 24h/7d deltas, rank changes and sparklines) and `static/latest-all.json` (slim rows for the full index, lazily fetched when searching), then commits both back to the repo.
 - Cloudflare Pages serves the SvelteKit app as a static SPA.
-- Extension detail pages call a Cloudflare Worker at `/api/extension`, which reads history from Turso.
+- Extension detail pages call a Cloudflare Worker at `/api/extension`, which reads history from Turso and serves stored metadata (refreshing it from Open VSX in the background).
+- The workflow fails (visibly) when the scrape records nothing or exceeds a 5% error rate, and the export refuses to overwrite good data with an empty ranking.
 
 ## Environment
 
@@ -34,7 +35,7 @@ pnpm install
 pnpm dev
 ```
 
-The index page reads `static/latest.json`. Generate it from the current database with:
+The index page reads `static/latest.json`. Generate it (and `static/latest-all.json`) from the current database with:
 
 ```sh
 pnpm export:latest
@@ -46,7 +47,23 @@ Run the full daily job locally with:
 pnpm scrape
 ```
 
+Detail pages call `/api/extension`, which the dev server proxies to `http://localhost:8787` (override with `API_PROXY_TARGET`). Run the Worker locally with:
+
+```sh
+cd worker
+cp wrangler.toml.example wrangler.toml   # once; point it at your database
+wrangler dev
+```
+
 ## Database
+
+The dev database (`local.db`) is managed with push:
+
+```sh
+pnpm db:push
+```
+
+CI and Turso use the checked-in migrations:
 
 ```sh
 pnpm db:generate
