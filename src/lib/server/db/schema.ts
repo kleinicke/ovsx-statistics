@@ -32,7 +32,10 @@ export const snapshots = sqliteTable(
 		downloadCount: integer('download_count').notNull(),
 		version: text('version').notNull()
 	},
-	(t) => [uniqueIndex('idx_snapshots_extension_date').on(t.extensionId, t.date)]
+	(t) => [
+		uniqueIndex('idx_snapshots_extension_date').on(t.extensionId, t.date),
+		index('idx_snapshots_date_download_count').on(t.date, t.downloadCount)
+	]
 );
 
 // VS Code Marketplace install counts — one row per extension per day
@@ -47,7 +50,10 @@ export const vsCodeSnapshots = sqliteTable(
 		scrapedAt: text('scraped_at').notNull(),
 		installCount: integer('install_count').notNull()
 	},
-	(t) => [uniqueIndex('idx_vscode_snapshots_extension_date').on(t.extensionId, t.date)]
+	(t) => [
+		uniqueIndex('idx_vscode_snapshots_extension_date').on(t.extensionId, t.date),
+		index('idx_vscode_snapshots_date').on(t.date)
+	]
 );
 
 // Tags fetched on-demand when visiting an extension page; indexed for future search
@@ -58,7 +64,11 @@ export const extensionTags = sqliteTable(
 		extensionId: integer('extension_id').notNull().references(() => extensions.id),
 		tag: text('tag').notNull()
 	},
-	(t) => [index('idx_tags_extension').on(t.extensionId), index('idx_tags_tag').on(t.tag)]
+	(t) => [
+		uniqueIndex('idx_tags_extension_tag').on(t.extensionId, t.tag),
+		index('idx_tags_extension').on(t.extensionId),
+		index('idx_tags_tag').on(t.tag)
+	]
 );
 
 // Written only when version changes — at most one event per extension per day

@@ -15,6 +15,13 @@
       "when": 1783430964621,
       "tag": "0001_supreme_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785159608632,
+      "tag": "0002_bored_weapon_omega",
+      "breakpoints": true
     }
   ]
 }

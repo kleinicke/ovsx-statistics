@@ -70,6 +70,29 @@ pnpm db:generate
 pnpm db:migrate
 ```
 
+### Importing historical local databases
+
+Create a fresh local target with the checked-in migrations, then merge source
+databases from oldest to newest. Sources are never modified; extensions are
+matched by `namespace`/`name`, and same-day conflicts use the latest
+`scraped_at` value.
+
+```sh
+DATABASE_URL=file:merged.db pnpm db:migrate
+pnpm merge:local merged.db local.db local23_7.db local_24_7.db local_27_7.db
+```
+
+After validating the merged database, migrate an empty Turso database and
+import it:
+
+```sh
+pnpm db:migrate
+pnpm import:turso merged.db
+```
+
+The Turso importer refuses to run when the remote `extensions` table is not
+empty.
+
 ## Deploying
 
 Cloudflare Pages can build the static app with:
