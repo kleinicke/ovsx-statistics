@@ -5,10 +5,13 @@
 	"type": "module",
 	"packageManager": "pnpm@11.10.0",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "vite build && wrangler pages dev",
+		"dev:vite": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
+		"deploy": "vite build && wrangler pages deploy build --project-name ovsx-statistics",
 		"scrape": "tsx scripts/scrape-daily.ts",
+		"sweep:vscode": "tsx scripts/sweep-vscode-ids.ts",
 		"export:latest": "tsx scripts/export-latest.ts",
 		"merge:local": "tsx scripts/merge-local-databases.ts",
 		"import:turso": "tsx scripts/import-to-turso.ts",
@@ -21,6 +24,7 @@
 		"db:studio": "drizzle-kit studio"
 	},
 	"devDependencies": {
+		"@cloudflare/workers-types": "^5.20260726.1",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.63.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
@@ -33,7 +37,8 @@
 		"tailwindcss": "^4.3.0",
 		"tsx": "^4.22.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.0.16"
+		"vite": "^8.0.16",
+		"wrangler": "^4.114.0"
 	},
 	"dependencies": {
 		"@libsql/client": "^0.15.15",

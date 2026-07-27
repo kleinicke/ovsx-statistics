@@ -29,8 +29,13 @@
 		}
 	}
 
+	// How many rows to render when browsing (not searching). Starts at the eager
+	// top rows; "Show more" loads the full index and reveals another page.
+	const PAGE = 500;
+	let limit = $state(data.rows.length);
+
 	const isFiltering = $derived(search.trim() !== '' || tagSearch.trim() !== '');
-	const source = $derived(isFiltering ? (allRows ?? data.rows) : data.rows);
+	const source = $derived(isFiltering || limit > data.rows.length ? (allRows ?? data.rows) : data.rows);
 
 	const filtered = $derived(
 		source.filter((r) => {
@@ -44,6 +49,14 @@
 			return matchesText && matchesTag;
 		})
 	);
+
+	// When searching, show every match; when browsing, page through with the limit.
+	const displayed = $derived(isFiltering ? filtered : filtered.slice(0, limit));
+
+	async function showMore() {
+		await ensureAllRows();
+		limit = Math.min(limit + PAGE, data.totalCount);
+	}
 </script>
 
 <svelte:head>
@@ -183,7 +196,7 @@
 					</tr>
 				</thead>
 				<tbody class="divide-y divide-[var(--color-border)]">
-					{#each filtered as row (row.id)}
+					{#each displayed as row (row.id)}
 						<tr class="hover:bg-[var(--color-accent)] transition-colors">
 							<td class="px-3 py-2.5 sm:px-4 sm:py-3 text-[var(--color-muted-foreground)] tabular-nums text-xs sm:text-sm whitespace-nowrap">
 								{row.rank}
@@ -242,7 +255,7 @@
 							</td>
 						</tr>
 					{/each}
-					{#if filtered.length === 0}
+					{#if displayed.length === 0}
 						<tr>
 							<td colspan="7" class="px-4 py-8 text-center text-[var(--color-muted-foreground)]">
 								{data.rows.length === 0 ? 'Scraping in progress…' : 'No results'}
@@ -252,5 +265,20 @@
 				</tbody>
 			</table>
 		</div>
+
+		{#if !isFiltering && displayed.length < data.totalCount}
+			<div class="flex items-center justify-center gap-3 pt-1">
+				<span class="text-xs text-[var(--color-muted-foreground)]">
+					Showing {displayed.length.toLocaleString('en-US')} of {data.totalCount.toLocaleString('en-US')}
+				</span>
+				<button
+					type="button"
+					onclick={showMore}
+					class="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-accent)] transition-colors"
+				>
+					Show more
+				</button>
+			</div>
+		{/if}
 	</div>
 </div>

@@ -1,0 +1,13 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "ovsx-statistics",
+	"pages_build_output_dir": "./build",
+	"compatibility_date": "2026-07-27",
+	"compatibility_flags": ["nodejs_compat"],
+	"vars": {
+		"ALLOWED_ORIGIN": "https://extensions.f-kleinicke.de"
+	},
+	"secrets": {
+		"required": ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]
+	}
+}

@@ -175,7 +175,11 @@
 	<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-6">
 		<h2 class="font-semibold mb-4">Download history</h2>
 		{#if data.history.length > 1}
-			<DownloadChart history={data.history} vsCodeHistory={data.vsCodeHistory} />
+			<DownloadChart
+				history={data.history}
+				vsCodeHistory={data.vsCodeHistory}
+				releases={data.releases}
+			/>
 		{:else}
 			<p class="text-sm text-[var(--color-muted-foreground)] text-center py-16">
 				Not enough data yet — check back after a second scrape.

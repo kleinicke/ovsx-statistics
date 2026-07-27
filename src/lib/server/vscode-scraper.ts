@@ -48,18 +48,24 @@ async function fetchInstalls(vsCodeIds: string[]): Promise<Map<string, number>> 
 // Discovery: try namespace.name as the VS Code ID for extensions without one.
 // Unmatched extensions are stamped with vscode_checked_at and retried after
 // RECHECK_AFTER_DAYS, so each run only queries new or stale candidates.
-export async function discoverVscodeIds(): Promise<{ discovered: number; checked: number }> {
+export async function discoverVscodeIds(
+	options: { force?: boolean } = {}
+): Promise<{ discovered: number; checked: number }> {
 	const cutoff = new Date(Date.now() - RECHECK_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+	// Normal runs only look at never-checked or stale candidates. A forced sweep
+	// re-checks every extension that still lacks a vscode_id, ignoring the gate.
+	const staleFilter = options.force
+		? isNull(extensions.vsCodeId)
+		: and(
+				isNull(extensions.vsCodeId),
+				or(isNull(extensions.vsCodeCheckedAt), lt(extensions.vsCodeCheckedAt, cutoff))
+			);
 
 	const candidates = await db
 		.select({ id: extensions.id, namespace: extensions.namespace, name: extensions.name })
 		.from(extensions)
-		.where(
-			and(
-				isNull(extensions.vsCodeId),
-				or(isNull(extensions.vsCodeCheckedAt), lt(extensions.vsCodeCheckedAt, cutoff))
-			)
-		)
+		.where(staleFilter)
 		.all();
 
 	if (candidates.length === 0) return { discovered: 0, checked: 0 };

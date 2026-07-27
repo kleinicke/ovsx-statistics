@@ -1,25 +1,5 @@
-import { createClient, type Client } from '@libsql/client/web';
+import { createClient } from '@libsql/client/web';
 import type { ExtensionDetailJson, ExtensionRecord, OpenVsxSnapshot, VersionEvent, VsCodeSnapshot } from '../src/lib/types.js';
-
-interface Env {
-	TURSO_DATABASE_URL: string;
-	TURSO_AUTH_TOKEN?: string;
-	ALLOWED_ORIGIN?: string;
-}
-
-interface WorkerContext {
-	waitUntil(promise: Promise<unknown>): void;
-}
-
-interface OpenVsxMeta {
-	iconUrl: string | null;
-	description: string | null;
-	tags: string[];
-	categories: string[];
-	repoUrl: string | null;
-	homepageUrl: string | null;
-	bugsUrl: string | null;
-}
 
 const corsHeaders = (env: Env) => ({
 	'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN ?? '*',
@@ -32,7 +12,10 @@ function jsonResponse(env: Env, body: unknown, init: ResponseInit = {}) {
 		...init,
 		headers: {
 			'Content-Type': 'application/json',
-			'Cache-Control': init.status && init.status >= 400 ? 'no-store' : 'public, max-age=300',
+			'Cache-Control':
+				init.status && init.status >= 400
+					? 'no-store'
+					: 'public, max-age=300, s-maxage=3600',
 			...corsHeaders(env),
 			...init.headers
 		}
@@ -48,54 +31,11 @@ function createDb(env: Env) {
 	});
 }
 
-async function fetchMeta(namespace: string, name: string): Promise<OpenVsxMeta | null> {
-	try {
-		const res = await fetch(`https://open-vsx.org/api/${namespace}/${name}`);
-		if (!res.ok) return null;
-		const d = await res.json() as {
-			files?: { icon?: string };
-			description?: string;
-			tags?: string[];
-			categories?: string[];
-			repository?: string;
-			homepage?: string;
-			bugs?: string;
-		};
-
-		return {
-			iconUrl: d.files?.icon ?? null,
-			description: d.description ?? null,
-			tags: d.tags ?? [],
-			categories: d.categories ?? [],
-			repoUrl: d.repository ?? null,
-			homepageUrl: d.homepage ?? null,
-			bugsUrl: d.bugs ?? null
-		};
-	} catch {
-		return null;
-	}
-}
-
-async function upsertMeta(db: Client, extensionId: number, meta: OpenVsxMeta) {
-	await db.execute({
-		sql: 'update extensions set repo_url = ?, homepage_url = ?, bugs_url = ?, icon_url = ?, description = ? where id = ?',
-		args: [meta.repoUrl, meta.homepageUrl, meta.bugsUrl, meta.iconUrl, meta.description, extensionId]
-	});
-
-	const allTags = [...new Set([...meta.tags, ...meta.categories])];
-	await db.execute({ sql: 'delete from extension_tags where extension_id = ?', args: [extensionId] });
-
-	if (allTags.length === 0) return;
-
-	const placeholders = allTags.map(() => '(?, ?)').join(', ');
-	const args = allTags.flatMap((tag) => [extensionId, tag]);
-	await db.execute({
-		sql: `insert into extension_tags (extension_id, tag) values ${placeholders}`,
-		args
-	});
-}
-
-async function getExtensionDetail(db: Client, namespace: string, name: string, ctx: WorkerContext): Promise<ExtensionDetailJson | null> {
+async function getExtensionDetail(
+	db: ReturnType<typeof createDb>,
+	namespace: string,
+	name: string
+): Promise<ExtensionDetailJson | null> {
 	const extResult = await db.execute({
 		sql: `
 			select
@@ -121,19 +61,7 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 	if (!ext) return null;
 	ext.pinned = Boolean(ext.pinned);
 
-	// The daily scrape stores icon/description, so metadata is usually already
-	// on hand — only block on the live Open VSX call when we have nothing yet,
-	// and refresh stored metadata in the background otherwise.
-	const hasStoredMeta = ext.iconUrl !== null || ext.description !== null;
-	const metaPromise: Promise<OpenVsxMeta | null> = hasStoredMeta
-		? Promise.resolve(null)
-		: fetchMeta(namespace, name);
-	if (hasStoredMeta) {
-		ctx.waitUntil(fetchMeta(namespace, name).then((m) => (m ? upsertMeta(db, ext.id, m) : undefined)));
-	}
-
-	const [meta, historyResult, vsCodeResult, releaseResult, tagResult] = await Promise.all([
-		metaPromise,
+	const [historyResult, vsCodeResult, releaseResult, tagResult] = await Promise.all([
 		db.execute({
 			sql: `
 				select date, scraped_at as scrapedAt, download_count as downloadCount, version
@@ -169,13 +97,10 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 		})
 	]);
 
-	if (meta) ctx.waitUntil(upsertMeta(db, ext.id, meta));
-
 	const history = historyResult.rows as unknown as OpenVsxSnapshot[];
 	const vsCodeHistory = vsCodeResult.rows as unknown as VsCodeSnapshot[];
 	const releases = releaseResult.rows as unknown as VersionEvent[];
-	const storedTags = tagResult.rows.map((row) => String(row.tag));
-	const tags = meta ? [...new Set([...meta.tags, ...meta.categories])] : storedTags;
+	const tags = tagResult.rows.map((row) => String(row.tag));
 
 	return {
 		ext,
@@ -185,16 +110,16 @@ async function getExtensionDetail(db: Client, namespace: string, name: string, c
 		latest: history.at(-1) ?? null,
 		latestVsCode: vsCodeHistory.at(-1) ?? null,
 		tags,
-		iconUrl: meta?.iconUrl ?? ext.iconUrl ?? null,
-		description: meta?.description ?? ext.description ?? null,
-		repoUrl: meta?.repoUrl ?? ext.repoUrl ?? null,
-		homepageUrl: meta?.homepageUrl ?? ext.homepageUrl ?? null,
-		bugsUrl: meta?.bugsUrl ?? ext.bugsUrl ?? null
+		iconUrl: ext.iconUrl ?? null,
+		description: ext.description ?? null,
+		repoUrl: ext.repoUrl ?? null,
+		homepageUrl: ext.homepageUrl ?? null,
+		bugsUrl: ext.bugsUrl ?? null
 	};
 }
 
 export default {
-	async fetch(request: Request, env: Env, ctx: WorkerContext): Promise<Response> {
+	async fetch(request: Request, env: Env): Promise<Response> {
 		if (request.method === 'OPTIONS') {
 			return new Response(null, { headers: corsHeaders(env) });
 		}
@@ -216,7 +141,7 @@ export default {
 
 		try {
 			const db = createDb(env);
-			const data = await getExtensionDetail(db, namespace, name, ctx);
+			const data = await getExtensionDetail(db, namespace, name);
 			if (!data) return jsonResponse(env, { error: 'Extension not found' }, { status: 404 });
 			return jsonResponse(env, data);
 		} catch (error) {

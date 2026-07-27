@@ -8,7 +8,7 @@ Tracks Open VSX download counts and optional VS Code Marketplace install counts 
 - The scraper fetches all Open VSX extensions (with retries), batch-writes snapshots to Turso, discovers VS Code Marketplace IDs, and records install counts.
 - The scraper exports `static/latest.json` (top 500 + pinned, with icons, 24h/7d deltas, rank changes and sparklines) and `static/latest-all.json` (slim rows for the full index, lazily fetched when searching), then commits both back to the repo.
 - Cloudflare Pages serves the SvelteKit app as a static SPA.
-- Extension detail pages call a Cloudflare Worker at `/api/extension`, which reads history from Turso and serves stored metadata (refreshing it from Open VSX in the background).
+- A same-origin Pages Function at `/api/extension` reads history and stored metadata from Turso. Successful responses are cached at the edge.
 - The workflow fails (visibly) when the scrape records nothing or exceeds a 5% error rate, and the export refuses to overwrite good data with an empty ranking.
 
 ## Environment
@@ -30,10 +30,24 @@ Add `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as GitHub Actions secrets before
 
 ## Developing
 
+The default development command builds the static app and runs the Pages
+Function locally. Wrangler reads the Turso credentials from the root `.env`
+file.
+
 ```sh
 pnpm install
 pnpm dev
 ```
+
+Open <http://localhost:8788>. This is the complete application, including
+`/api/extension`.
+
+For frontend-only work with Vite's faster hot-module reload, use `pnpm
+dev:vite`. Detail pages then require a Pages dev server on port 8787 or an
+`API_PROXY_TARGET` pointing at a deployed site.
+
+Restart `pnpm dev` after changing frontend source. Changes inside `functions/`
+are picked up by Wrangler while it is running.
 
 The index page reads `static/latest.json`. Generate it (and `static/latest-all.json`) from the current database with:
 
@@ -45,14 +59,6 @@ Run the full daily job locally with:
 
 ```sh
 pnpm scrape
-```
-
-Detail pages call `/api/extension`, which the dev server proxies to `http://localhost:8787` (override with `API_PROXY_TARGET`). Run the Worker locally with:
-
-```sh
-cd worker
-cp wrangler.toml.example wrangler.toml   # once; point it at your database
-wrangler dev
 ```
 
 ## Database
@@ -95,14 +101,26 @@ empty.
 
 ## Deploying
 
-Cloudflare Pages can build the static app with:
+The Pages project is `ovsx-statistics`; its production custom domain is
+`extensions.f-kleinicke.de`. To build and deploy the static app and Pages
+Function together:
 
 ```sh
-pnpm build
+pnpm deploy
 ```
 
-Deploy the Worker in `worker/` and route `/api/extension` to it. Start from `worker/wrangler.toml.example` and set `TURSO_AUTH_TOKEN` with:
+The repository uses `wrangler.jsonc` as the source of truth. Wrangler uses the
+locally authenticated Cloudflare account for manual deployments. The encrypted
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` values must remain configured in
+the Pages project's production and preview environments.
 
-```sh
-wrangler secret put TURSO_AUTH_TOKEN
-```
+The daily GitHub Action scrapes into Turso, regenerates the two JSON exports,
+and commits them to `main`. Because this Pages project uses Direct Upload, a
+GitHub commit does not deploy by itself. To make code changes and daily JSON
+updates deploy automatically, add `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` as GitHub Actions secrets. The token needs the
+**Account → Cloudflare Pages → Edit** permission. The deployment workflow can
+then run `pnpm deploy` after updates.
+
+Until that CI token is configured, run `pnpm deploy` manually after pulling or
+changing the repository.

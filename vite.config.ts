@@ -5,9 +5,9 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	server: {
-		// Detail pages call /api/extension, served by the Cloudflare Worker in
-		// production. In dev, run `wrangler dev` in worker/ (defaults to :8787)
-		// or point API_PROXY_TARGET at a deployed Worker.
+		// `pnpm dev:vite` is the frontend-only fast path. It proxies detail API
+		// requests to a separately running Pages dev server or deployed URL.
+		// The default `pnpm dev` command serves the complete Pages application.
 		proxy: {
 			'/api': {
 				target: process.env.API_PROXY_TARGET ?? 'http://localhost:8787',
