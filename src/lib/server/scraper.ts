@@ -176,15 +176,24 @@ export async function runScrape(): Promise<{ scraped: number; errors: string[] }
 	const idByKey = new Map(allExtensions.map((e) => [key(e), e.id]));
 
 	// Previous latest version per extension, for version-change detection
+	// Use one indexed lookup per extension instead of grouping the entire
+	// historical snapshots table on every daily run.
 	const prevRows = await db.all<{ extensionId: number; version: string }>(sql`
-		select s.extension_id as extensionId, s.version as version
-		from snapshots s
-		join (
-			select extension_id, max(date) as d
-			from snapshots
-			where date < ${date}
-			group by extension_id
-		) m on m.extension_id = s.extension_id and m.d = s.date
+		select
+			e.id as extensionId,
+			(
+				select s.version
+				from snapshots s
+				where s.extension_id = e.id and s.date < ${date}
+				order by s.date desc
+				limit 1
+			) as version
+		from extensions e
+		where exists (
+			select 1
+			from snapshots s
+			where s.extension_id = e.id and s.date < ${date}
+		)
 	`);
 	const prevVersion = new Map(prevRows.map((r) => [r.extensionId, r.version]));
 

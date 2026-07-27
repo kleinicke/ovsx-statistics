@@ -10,6 +10,8 @@
 		"preview": "vite preview",
 		"scrape": "tsx scripts/scrape-daily.ts",
 		"export:latest": "tsx scripts/export-latest.ts",
+		"merge:local": "tsx scripts/merge-local-databases.ts",
+		"import:turso": "tsx scripts/import-to-turso.ts",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
