@@ -6,8 +6,5 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"vars": {
 		"ALLOWED_ORIGIN": "https://extensions.f-kleinicke.de"
-	},
-	"secrets": {
-		"required": ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]
 	}
 }

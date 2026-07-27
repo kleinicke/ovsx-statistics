@@ -115,12 +115,11 @@ locally authenticated Cloudflare account for manual deployments. The encrypted
 the Pages project's production and preview environments.
 
 The daily GitHub Action scrapes into Turso, regenerates the two JSON exports,
-and commits them to `main`. Because this Pages project uses Direct Upload, a
-GitHub commit does not deploy by itself. To make code changes and daily JSON
-updates deploy automatically, add `CLOUDFLARE_ACCOUNT_ID` and
-`CLOUDFLARE_API_TOKEN` as GitHub Actions secrets. The token needs the
-**Account → Cloudflare Pages → Edit** permission. The deployment workflow can
-then run `pnpm deploy` after updates.
+commits them to `main`, then calls the Pages deployment workflow. Normal pushes
+to `main` also deploy automatically.
 
-Until that CI token is configured, run `pnpm deploy` manually after pulling or
-changing the repository.
+The deployment workflow requires the GitHub Actions secrets
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. The token needs the
+**Account → Cloudflare Pages → Edit** permission. Until those CI credentials
+are configured, run `pnpm deploy` manually after pulling or changing the
+repository.
