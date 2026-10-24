@@ -115,8 +115,15 @@ locally authenticated Cloudflare account for manual deployments. The encrypted
 the Pages project's production and preview environments.
 
 The daily GitHub Action scrapes into Turso, regenerates the two JSON exports,
-commits them to `main`, then calls the Pages deployment workflow. Normal pushes
-to `main` also deploy automatically.
+commits them to `main`, then calls the Pages deployment workflow.
+
+Pushes to `main` do **not** deploy on their own: the Pages project has no Git
+provider connected (`wrangler pages project list` shows `Git Provider: No`), so
+the CI deploy job is the only automated path, and it fails without the
+credentials below. Until those are configured, the scrape keeps committing fresh
+exports that never reach the site, and the ranking homepage silently serves a
+stale build while detail pages stay current via Turso. Run `pnpm deploy`
+manually to catch the site up.
 
 The deployment workflow requires the GitHub Actions secrets
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`. The token needs the

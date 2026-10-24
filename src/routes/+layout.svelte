@@ -38,7 +38,7 @@
 		<div
 			class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm text-[var(--color-muted-foreground)]"
 		>
-			<span>© {new Date().getFullYear()} Florian Kleinicke</span>
+			<span>© {new Date().getFullYear()} Florian Nick</span>
 			<nav class="flex flex-wrap items-center gap-x-4 gap-y-2">
 				<a
 					href="https://f-kleinicke.de"
