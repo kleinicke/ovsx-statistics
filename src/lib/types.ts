@@ -39,6 +39,7 @@ export interface ExtensionRecord {
 	displayName: string;
 	pinned: boolean;
 	vsCodeId: string | null;
+	jetbrainsId: number | null;
 	iconUrl: string | null;
 	description: string | null;
 	repoUrl: string | null;
@@ -59,6 +60,12 @@ export interface VsCodeSnapshot {
 	installCount: number;
 }
 
+export interface JetBrainsSnapshot {
+	date: string;
+	scrapedAt: string;
+	downloadCount: number;
+}
+
 export interface VersionEvent {
 	id: number;
 	date: string;
@@ -71,9 +78,11 @@ export interface ExtensionDetailJson {
 	ext: ExtensionRecord;
 	history: OpenVsxSnapshot[];
 	vsCodeHistory: VsCodeSnapshot[];
+	jetbrainsHistory: JetBrainsSnapshot[];
 	releases: VersionEvent[];
 	latest: OpenVsxSnapshot | null;
 	latestVsCode: VsCodeSnapshot | null;
+	latestJetbrains: JetBrainsSnapshot | null;
 	tags: string[];
 	iconUrl: string | null;
 	description: string | null;

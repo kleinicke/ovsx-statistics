@@ -1,5 +1,5 @@
 import { createClient } from '@libsql/client/web';
-import type { ExtensionDetailJson, ExtensionRecord, OpenVsxSnapshot, VersionEvent, VsCodeSnapshot } from '../src/lib/types.js';
+import type { ExtensionDetailJson, ExtensionRecord, JetBrainsSnapshot, OpenVsxSnapshot, VersionEvent, VsCodeSnapshot } from '../src/lib/types.js';
 
 const corsHeaders = (env: Env) => ({
 	'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN ?? '*',
@@ -45,6 +45,7 @@ async function getExtensionDetail(
 				display_name as displayName,
 				pinned,
 				vscode_id as vsCodeId,
+				jetbrains_id as jetbrainsId,
 				icon_url as iconUrl,
 				description,
 				repo_url as repoUrl,
@@ -61,7 +62,7 @@ async function getExtensionDetail(
 	if (!ext) return null;
 	ext.pinned = Boolean(ext.pinned);
 
-	const [historyResult, vsCodeResult, releaseResult, tagResult] = await Promise.all([
+	const [historyResult, vsCodeResult, jetbrainsResult, releaseResult, tagResult] = await Promise.all([
 		db.execute({
 			sql: `
 				select date, scraped_at as scrapedAt, download_count as downloadCount, version
@@ -76,6 +77,17 @@ async function getExtensionDetail(
 					sql: `
 						select date, scraped_at as scrapedAt, install_count as installCount
 						from vscode_snapshots
+						where extension_id = ?
+						order by date asc
+					`,
+					args: [ext.id]
+				})
+			: Promise.resolve({ rows: [] }),
+		ext.jetbrainsId
+			? db.execute({
+					sql: `
+						select date, scraped_at as scrapedAt, download_count as downloadCount
+						from jetbrains_snapshots
 						where extension_id = ?
 						order by date asc
 					`,
@@ -99,6 +111,7 @@ async function getExtensionDetail(
 
 	const history = historyResult.rows as unknown as OpenVsxSnapshot[];
 	const vsCodeHistory = vsCodeResult.rows as unknown as VsCodeSnapshot[];
+	const jetbrainsHistory = jetbrainsResult.rows as unknown as JetBrainsSnapshot[];
 	const releases = releaseResult.rows as unknown as VersionEvent[];
 	const tags = tagResult.rows.map((row) => String(row.tag));
 
@@ -106,9 +119,11 @@ async function getExtensionDetail(
 		ext,
 		history,
 		vsCodeHistory,
+		jetbrainsHistory,
 		releases,
 		latest: history.at(-1) ?? null,
 		latestVsCode: vsCodeHistory.at(-1) ?? null,
+		latestJetbrains: jetbrainsHistory.at(-1) ?? null,
 		tags,
 		iconUrl: ext.iconUrl ?? null,
 		description: ext.description ?? null,

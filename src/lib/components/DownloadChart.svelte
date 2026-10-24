@@ -43,6 +43,12 @@
 		installCount: number;
 	}
 
+	interface JetBrainsPoint {
+		date: string;
+		scrapedAt: string;
+		downloadCount: number;
+	}
+
 	interface ReleaseEvent {
 		date: string;
 		newVersion: string;
@@ -52,10 +58,12 @@
 	let {
 		history,
 		vsCodeHistory = [],
+		jetbrainsHistory = [],
 		releases = []
 	}: {
 		history: OpenVsxPoint[];
 		vsCodeHistory?: VsCodePoint[];
+		jetbrainsHistory?: JetBrainsPoint[];
 		releases?: ReleaseEvent[];
 	} = $props();
 
@@ -151,6 +159,7 @@
 		const gridColor = isDark ? 'oklch(20% 0.01 264)' : 'oklch(90% 0.005 264)';
 		const openVsxColor = isDark ? 'oklch(70% 0.15 240)' : 'oklch(50% 0.2 240)'; // blue
 		const vsCodeColor = isDark ? 'oklch(75% 0.15 75)' : 'oklch(60% 0.18 75)'; // amber
+		const jetbrainsColor = isDark ? 'oklch(72% 0.17 340)' : 'oklch(58% 0.2 340)'; // pink
 		const releaseColor = isDark ? 'oklch(72% 0.15 155)' : 'oklch(58% 0.16 155)'; // green
 
 		const openVsxBuckets = toBuckets(
@@ -164,8 +173,16 @@
 			metric
 		);
 
-		// Unified, sorted bucket axis across both series.
-		const keys = [...new Set([...openVsxBuckets.keys(), ...vsCodeBuckets.keys()])].sort();
+		const jetbrainsBuckets = toBuckets(
+			jetbrainsHistory.map((j) => ({ date: j.date, value: j.downloadCount })),
+			granularity,
+			metric
+		);
+
+		// Unified, sorted bucket axis across all series.
+		const keys = [
+			...new Set([...openVsxBuckets.keys(), ...vsCodeBuckets.keys(), ...jetbrainsBuckets.keys()])
+		].sort();
 		const labels = keys.map((k) => bucketLabel(k, granularity));
 
 		// version (of the latest reading) per bucket, for the tooltip
@@ -193,6 +210,7 @@
 			: [];
 
 		const hasVsCode = vsCodeBuckets.size > 0;
+		const hasJetbrains = jetbrainsBuckets.size > 0;
 		const isBar = metric === 'new';
 		const pointRadius = labels.length > 60 ? 0 : 3;
 
@@ -229,6 +247,22 @@
 			});
 		}
 
+		if (hasJetbrains) {
+			datasets.push({
+				type: isBar ? 'bar' : 'line',
+				label: metric === 'new' ? 'JetBrains new downloads' : 'JetBrains downloads',
+				data: keys.map((k) => jetbrainsBuckets.get(k) ?? null),
+				borderColor: jetbrainsColor,
+				backgroundColor: isBar ? jetbrainsColor : jetbrainsColor + '20',
+				fill: false,
+				tension: 0.3,
+				pointRadius,
+				pointHoverRadius: 5,
+				yAxisID: 'yRight',
+				spanGaps: false
+			});
+		}
+
 		chart = new Chart(canvas, {
 			type: isBar ? 'bar' : 'line',
 			data: { labels, datasets },
@@ -238,7 +272,7 @@
 				interaction: { mode: 'index', intersect: false },
 				plugins: {
 					legend: {
-						display: hasVsCode,
+						display: hasVsCode || hasJetbrains,
 						labels: { color: textColor, boxWidth: 12, padding: 16 }
 					},
 					tooltip: {
@@ -286,13 +320,13 @@
 						},
 						grid: { color: gridColor }
 					},
-					...(hasVsCode && {
+					...((hasVsCode || hasJetbrains) && {
 						yRight: {
 							type: 'linear',
 							position: 'right',
 							beginAtZero: metric === 'new',
 							ticks: {
-								color: vsCodeColor,
+								color: hasVsCode ? vsCodeColor : jetbrainsColor,
 								callback: (v) => (typeof v === 'number' ? formatNumber(v) : String(v))
 							},
 							grid: { drawOnChartArea: false }
@@ -313,6 +347,7 @@
 		void themeVersion;
 		void history;
 		void vsCodeHistory;
+		void jetbrainsHistory;
 		void releases;
 		buildChart();
 	});

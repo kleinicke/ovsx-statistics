@@ -10,6 +10,7 @@ export const extensions = sqliteTable(
 		pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
 		vsCodeId: text('vscode_id'), // e.g. "ms-python.python", null = not on VS Code Marketplace
 		vsCodeCheckedAt: text('vscode_checked_at'), // ISO 8601 — last VS Code Marketplace discovery attempt
+		jetbrainsId: integer('jetbrains_id'), // numeric JetBrains Marketplace plugin ID, null = not published there
 		iconUrl: text('icon_url'),
 		description: text('description'),
 		repoUrl: text('repo_url'),
@@ -53,6 +54,24 @@ export const vsCodeSnapshots = sqliteTable(
 	(t) => [
 		uniqueIndex('idx_vscode_snapshots_extension_date').on(t.extensionId, t.date),
 		index('idx_vscode_snapshots_date').on(t.date)
+	]
+);
+
+// JetBrains Marketplace download counts — one row per plugin per day
+export const jetbrainsSnapshots = sqliteTable(
+	'jetbrains_snapshots',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		extensionId: integer('extension_id')
+			.notNull()
+			.references(() => extensions.id),
+		date: text('date').notNull(), // YYYY-MM-DD
+		scrapedAt: text('scraped_at').notNull(),
+		downloadCount: integer('download_count').notNull()
+	},
+	(t) => [
+		uniqueIndex('idx_jetbrains_snapshots_extension_date').on(t.extensionId, t.date),
+		index('idx_jetbrains_snapshots_date').on(t.date)
 	]
 );
 

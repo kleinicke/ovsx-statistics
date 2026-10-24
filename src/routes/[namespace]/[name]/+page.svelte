@@ -18,6 +18,13 @@
 			: null
 	);
 
+	const jetbrainsDelta = $derived(
+		data.jetbrainsHistory.length >= 2
+			? data.jetbrainsHistory.at(-1)!.downloadCount - data.jetbrainsHistory.at(-2)!.downloadCount
+			: null
+	);
+	const jetbrainsByDate = $derived(new Map(data.jetbrainsHistory.map((j) => [j.date, j])));
+
 	// VS Code snapshots start later than Open VSX ones, so pair them by date
 	const vsCodeByDate = $derived(new Map(data.vsCodeHistory.map((v) => [v.date, v])));
 
@@ -26,6 +33,9 @@
 		data.ext.vsCodeId
 			? `https://marketplace.visualstudio.com/items?itemName=${data.ext.vsCodeId}`
 			: null
+	);
+	const jetbrainsUrl = $derived(
+		data.ext.jetbrainsId ? `https://plugins.jetbrains.com/plugin/${data.ext.jetbrainsId}` : null
 	);
 </script>
 
@@ -79,6 +89,12 @@
 				<a href={vsCodeUrl} target="_blank" rel="noopener noreferrer"
 					class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-accent)] transition-colors">
 					<ExternalLink class="h-3.5 w-3.5" />VS Code Marketplace
+				</a>
+			{/if}
+			{#if jetbrainsUrl}
+				<a href={jetbrainsUrl} target="_blank" rel="noopener noreferrer"
+					class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-accent)] transition-colors">
+					<ExternalLink class="h-3.5 w-3.5" />JetBrains Marketplace
 				</a>
 			{/if}
 			{#if data.repoUrl}
@@ -171,6 +187,34 @@
 		</div>
 	{/if}
 
+	<!-- JetBrains Marketplace stat cards -->
+	{#if data.ext.jetbrainsId}
+		<div>
+			<h2 class="text-xs font-medium text-[var(--color-muted-foreground)] mb-3 uppercase tracking-wide">JetBrains Marketplace</h2>
+			<div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+				<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+					<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Total downloads</div>
+					<div class="text-xl font-semibold tabular-nums">
+						{data.latestJetbrains ? formatNumberFull(data.latestJetbrains.downloadCount) : '—'}
+					</div>
+				</div>
+				<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+					<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Since yesterday</div>
+					<div class="text-xl font-semibold tabular-nums">
+						{#if jetbrainsDelta === null}—
+						{:else if jetbrainsDelta >= 0}<span class="text-[var(--color-emerald)]">+{formatNumberFull(jetbrainsDelta)}</span>
+						{:else}<span class="text-[var(--color-rose)]">{formatNumberFull(jetbrainsDelta)}</span>
+						{/if}
+					</div>
+				</div>
+				<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+					<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Plugin ID</div>
+					<div class="text-sm font-mono text-[var(--color-muted-foreground)] truncate mt-1">{data.ext.jetbrainsId}</div>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- Chart -->
 	<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] p-6">
 		<h2 class="font-semibold mb-4">Download history</h2>
@@ -178,6 +222,7 @@
 			<DownloadChart
 				history={data.history}
 				vsCodeHistory={data.vsCodeHistory}
+				jetbrainsHistory={data.jetbrainsHistory}
 				releases={data.releases}
 			/>
 		{:else}
@@ -223,12 +268,16 @@
 							{#if data.ext.vsCodeId}
 								<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">VS Code installs</th>
 							{/if}
+							{#if data.ext.jetbrainsId}
+								<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">JetBrains DLs</th>
+							{/if}
 							<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">Version</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-[var(--color-border)]">
 						{#each [...data.history].reverse() as snap (snap.date)}
 							{@const vsSnap = data.ext.vsCodeId ? (vsCodeByDate.get(snap.date) ?? null) : null}
+							{@const jbSnap = data.ext.jetbrainsId ? (jetbrainsByDate.get(snap.date) ?? null) : null}
 							<tr class="hover:bg-[var(--color-accent)] transition-colors">
 								<td class="px-4 py-2.5 font-mono text-xs text-[var(--color-muted-foreground)]">
 									{snap.scrapedAt.slice(0, 19).replace('T', ' ')}
@@ -237,6 +286,11 @@
 								{#if data.ext.vsCodeId}
 									<td class="px-4 py-2.5 text-right tabular-nums">
 										{vsSnap ? formatNumberFull(vsSnap.installCount) : '—'}
+									</td>
+								{/if}
+								{#if data.ext.jetbrainsId}
+									<td class="px-4 py-2.5 text-right tabular-nums">
+										{jbSnap ? formatNumberFull(jbSnap.downloadCount) : '—'}
 									</td>
 								{/if}
 								<td class="px-4 py-2.5 text-right font-mono text-xs text-[var(--color-muted-foreground)] whitespace-nowrap">

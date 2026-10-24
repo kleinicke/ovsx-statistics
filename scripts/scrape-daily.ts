@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { appendFile } from 'node:fs/promises';
 import { runScrape } from '../src/lib/server/scraper.js';
+import { scrapeJetbrainsDownloads } from '../src/lib/server/jetbrains-scraper.js';
 import { discoverVscodeIds, scrapeVscodeInstalls } from '../src/lib/server/vscode-scraper.js';
 
 const MAX_ERROR_RATE = 0.05;
@@ -45,6 +46,18 @@ try {
 	failed = true;
 	console.error(`[scrape-daily] VS Code scrape failed: ${e}`);
 	summary.push(`- ❌ VS Code scrape failed: ${e}`);
+}
+
+try {
+	const jetbrains = await scrapeJetbrainsDownloads();
+	console.log(`[scrape-daily] JetBrains scraped=${jetbrains.scraped} errors=${jetbrains.errors.length}`);
+	logErrors('jetbrains', jetbrains.errors);
+	summary.push(`- JetBrains downloads: **${jetbrains.scraped}** scraped, ${jetbrains.errors.length} errors`);
+	if (jetbrains.errors.length > 0) failed = true;
+} catch (e) {
+	failed = true;
+	console.error(`[scrape-daily] JetBrains scrape failed: ${e}`);
+	summary.push(`- ❌ JetBrains scrape failed: ${e}`);
 }
 
 if (openVsx.scraped > 0) {
