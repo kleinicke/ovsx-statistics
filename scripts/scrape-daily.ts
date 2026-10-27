@@ -74,16 +74,17 @@ try {
 	summary.push(`- ❌ Zenodo scrape failed: ${e}`);
 }
 
+// YouTube is best-effort: the watch-page fallback is often blocked on CI runners,
+// so failures raise a warning annotation but never fail the job (or skip the deploy).
 try {
 	const youtube = await scrapeYoutubeViews();
 	console.log(`[scrape-daily] YouTube scraped=${youtube.scraped} errors=${youtube.errors.length}`);
 	logErrors('youtube', youtube.errors);
 	summary.push(`- YouTube views: **${youtube.scraped}** scraped, ${youtube.errors.length} errors`);
-	if (youtube.errors.length > 0) failed = true;
+	for (const err of youtube.errors) console.log(`::warning title=YouTube scrape::${err}`);
 } catch (e) {
-	failed = true;
-	console.error(`[scrape-daily] YouTube scrape failed: ${e}`);
-	summary.push(`- ❌ YouTube scrape failed: ${e}`);
+	console.log(`::warning title=YouTube scrape::${e}`);
+	summary.push(`- ⚠️ YouTube scrape failed: ${e}`);
 }
 
 if (openVsx.scraped > 0) {
