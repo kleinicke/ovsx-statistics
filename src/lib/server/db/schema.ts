@@ -75,6 +75,25 @@ export const jetbrainsSnapshots = sqliteTable(
 	]
 );
 
+// Extra per-day numbers for sources that report more than one (e.g. Zenodo
+// unique/total downloads and views). The main series stays in the snapshot tables.
+export const sourceMetrics = sqliteTable(
+	'source_metrics',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		extensionId: integer('extension_id')
+			.notNull()
+			.references(() => extensions.id),
+		date: text('date').notNull(), // YYYY-MM-DD
+		metric: text('metric').notNull(), // key from METRIC_LABELS in utils.ts
+		value: integer('value').notNull()
+	},
+	(t) => [
+		uniqueIndex('idx_source_metrics_extension_date_metric').on(t.extensionId, t.date, t.metric),
+		index('idx_source_metrics_extension').on(t.extensionId)
+	]
+);
+
 // Tags fetched on-demand when visiting an extension page; indexed for future search
 export const extensionTags = sqliteTable(
 	'extension_tags',

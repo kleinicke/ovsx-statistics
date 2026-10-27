@@ -59,12 +59,14 @@
 		history,
 		vsCodeHistory = [],
 		jetbrainsHistory = [],
-		releases = []
+		releases = [],
+		seriesLabel = 'Open VSX downloads'
 	}: {
 		history: OpenVsxPoint[];
 		vsCodeHistory?: VsCodePoint[];
 		jetbrainsHistory?: JetBrainsPoint[];
 		releases?: ReleaseEvent[];
+		seriesLabel?: string;
 	} = $props();
 
 	type Metric = 'cumulative' | 'new';
@@ -218,7 +220,7 @@
 		const datasets: DS[] = [
 			{
 				type: isBar ? 'bar' : 'line',
-				label: metric === 'new' ? 'Open VSX new downloads' : 'Open VSX downloads',
+				label: metric === 'new' ? seriesLabel.replace(' ', ' new ') : seriesLabel,
 				data: keys.map((k) => openVsxBuckets.get(k) ?? null),
 				borderColor: openVsxColor,
 				backgroundColor: isBar ? openVsxColor : openVsxColor + '20',
@@ -281,7 +283,7 @@
 								const val = ctx.parsed.y;
 								if (val === null) return '';
 								const isVsCode = ctx.dataset.label?.includes('VS Code');
-								const unit = isVsCode ? 'installs' : 'downloads';
+								const unit = isVsCode ? 'installs' : (ctx.dataset.label ?? '').endsWith('views') ? 'views' : 'downloads';
 								const prefix = metric === 'new' && val >= 0 ? '+' : '';
 								return ` ${ctx.dataset.label}: ${prefix}${val.toLocaleString('en-US')} ${unit}`;
 							},
@@ -349,6 +351,7 @@
 		void vsCodeHistory;
 		void jetbrainsHistory;
 		void releases;
+		void seriesLabel;
 		buildChart();
 	});
 

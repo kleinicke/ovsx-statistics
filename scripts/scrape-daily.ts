@@ -2,6 +2,8 @@ import 'dotenv/config';
 import { appendFile } from 'node:fs/promises';
 import { runScrape } from '../src/lib/server/scraper.js';
 import { scrapeJetbrainsDownloads } from '../src/lib/server/jetbrains-scraper.js';
+import { scrapeZenodoDownloads } from '../src/lib/server/zenodo-scraper.js';
+import { scrapeYoutubeViews } from '../src/lib/server/youtube-scraper.js';
 import { discoverVscodeIds, scrapeVscodeInstalls } from '../src/lib/server/vscode-scraper.js';
 
 const MAX_ERROR_RATE = 0.05;
@@ -58,6 +60,30 @@ try {
 	failed = true;
 	console.error(`[scrape-daily] JetBrains scrape failed: ${e}`);
 	summary.push(`- ❌ JetBrains scrape failed: ${e}`);
+}
+
+try {
+	const zenodo = await scrapeZenodoDownloads();
+	console.log(`[scrape-daily] Zenodo scraped=${zenodo.scraped} errors=${zenodo.errors.length}`);
+	logErrors('zenodo', zenodo.errors);
+	summary.push(`- Zenodo downloads: **${zenodo.scraped}** scraped, ${zenodo.errors.length} errors`);
+	if (zenodo.errors.length > 0) failed = true;
+} catch (e) {
+	failed = true;
+	console.error(`[scrape-daily] Zenodo scrape failed: ${e}`);
+	summary.push(`- ❌ Zenodo scrape failed: ${e}`);
+}
+
+try {
+	const youtube = await scrapeYoutubeViews();
+	console.log(`[scrape-daily] YouTube scraped=${youtube.scraped} errors=${youtube.errors.length}`);
+	logErrors('youtube', youtube.errors);
+	summary.push(`- YouTube views: **${youtube.scraped}** scraped, ${youtube.errors.length} errors`);
+	if (youtube.errors.length > 0) failed = true;
+} catch (e) {
+	failed = true;
+	console.error(`[scrape-daily] YouTube scrape failed: ${e}`);
+	summary.push(`- ❌ YouTube scrape failed: ${e}`);
 }
 
 if (openVsx.scraped > 0) {

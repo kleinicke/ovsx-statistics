@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import { formatNumber, formatNumberFull } from '$lib/utils.js';
+	import { formatNumber, formatNumberFull, EXTERNAL_SOURCES, METRIC_LABELS } from '$lib/utils.js';
 	import DownloadChart from '$lib/components/DownloadChart.svelte';
 	import { ArrowLeft, Pin, Tag, ExternalLink, GitBranch, Bug, Globe } from 'lucide-svelte';
 
@@ -28,16 +28,56 @@
 	// VS Code snapshots start later than Open VSX ones, so pair them by date
 	const vsCodeByDate = $derived(new Map(data.vsCodeHistory.map((v) => [v.date, v])));
 
-	const openVsxUrl = $derived(`https://open-vsx.org/extension/${data.ext.namespace}/${data.ext.name}`);
+	// Zenodo / YouTube entries are not Open VSX extensions
+	const external = $derived(EXTERNAL_SOURCES[data.ext.namespace] ?? null);
+	const sourceLabel = $derived(external?.label ?? 'Open VSX');
+	const unit = $derived(external?.unit ?? 'downloads');
+	const openVsxUrl = $derived(
+		external
+			? external.url(data.ext.name)
+			: `https://open-vsx.org/extension/${data.ext.namespace}/${data.ext.name}`
+	);
 	const vsCodeUrl = $derived(
 		data.ext.vsCodeId
 			? `https://marketplace.visualstudio.com/items?itemName=${data.ext.vsCodeId}`
 			: null
 	);
+	// Latest value of every extra metric, with the change since the previous day it was recorded
+	const metricRows = $derived.by(() => {
+		const byMetric = new Map<string, { date: string; value: number }[]>();
+		for (const m of data.metrics) {
+			const list = byMetric.get(m.metric) ?? [];
+			list.push(m);
+			byMetric.set(m.metric, list);
+		}
+		return Object.entries(METRIC_LABELS)
+			.filter(([key]) => byMetric.has(key))
+			.map(([key, meta]) => {
+				const list = byMetric.get(key)!;
+				const last = list.at(-1)!;
+				const prev = list.length >= 2 ? list.at(-2)! : null;
+				return { key, ...meta, value: last.value, delta: prev ? last.value - prev.value : null };
+			});
+	});
+
 	const jetbrainsUrl = $derived(
 		data.ext.jetbrainsId ? `https://plugins.jetbrains.com/plugin/${data.ext.jetbrainsId}` : null
 	);
 </script>
+
+{#snippet metricsGrid()}
+	<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+		{#each metricRows as m (m.key)}
+			<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-3">
+				<div class="text-xs text-[var(--color-muted-foreground)] mb-1">{m.label}</div>
+				<div class="text-lg font-semibold tabular-nums">{formatNumberFull(m.value)}</div>
+				{#if m.delta !== null && m.delta !== 0}
+					<div class="text-xs tabular-nums text-[var(--color-emerald)]">+{formatNumberFull(m.delta)}</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
+{/snippet}
 
 <svelte:head>
 	<title>{data.ext.displayName} — download statistics</title>
@@ -83,7 +123,7 @@
 		<div class="flex flex-wrap items-center gap-2 shrink-0">
 			<a href={openVsxUrl} target="_blank" rel="noopener noreferrer"
 				class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-accent)] transition-colors">
-				<ExternalLink class="h-3.5 w-3.5" />Open VSX
+				<ExternalLink class="h-3.5 w-3.5" />{sourceLabel}
 			</a>
 			{#if vsCodeUrl}
 				<a href={vsCodeUrl} target="_blank" rel="noopener noreferrer"
@@ -97,7 +137,7 @@
 					<ExternalLink class="h-3.5 w-3.5" />JetBrains Marketplace
 				</a>
 			{/if}
-			{#if data.repoUrl}
+			{#if data.repoUrl && !external}
 				<a href={data.repoUrl} target="_blank" rel="noopener noreferrer"
 					class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-accent)] transition-colors">
 					<GitBranch class="h-3.5 w-3.5" />Repository
@@ -131,10 +171,10 @@
 
 	<!-- Open VSX stat cards -->
 	<div>
-		<h2 class="text-xs font-medium text-[var(--color-muted-foreground)] mb-3 uppercase tracking-wide">Open VSX</h2>
-		<div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+		<h2 class="text-xs font-medium text-[var(--color-muted-foreground)] mb-3 uppercase tracking-wide">{sourceLabel}</h2>
+		<div class="grid grid-cols-2 gap-4 {external ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}">
 			<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
-				<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Total downloads</div>
+				<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Total {unit}</div>
 				<div class="text-xl font-semibold tabular-nums">
 					{data.latest ? formatNumberFull(data.latest.downloadCount) : '—'}
 				</div>
@@ -148,16 +188,25 @@
 					{/if}
 				</div>
 			</div>
-			<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
-				<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Current version</div>
-				<div class="text-xl font-semibold font-mono">{data.latest ? `v${data.latest.version}` : '—'}</div>
-			</div>
+			{#if !external}
+				<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
+					<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Current version</div>
+					<div class="text-xl font-semibold font-mono">{data.latest ? `v${data.latest.version}` : '—'}</div>
+				</div>
+			{/if}
 			<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4">
 				<div class="text-xs text-[var(--color-muted-foreground)] mb-1">Days tracked</div>
 				<div class="text-xl font-semibold tabular-nums">{data.history.length}</div>
 			</div>
 		</div>
 	</div>
+
+	{#if external && metricRows.length > 0}
+		<div>
+			<h2 class="text-xs font-medium text-[var(--color-muted-foreground)] mb-3 uppercase tracking-wide">All {sourceLabel} numbers</h2>
+			{@render metricsGrid()}
+		</div>
+	{/if}
 
 	<!-- VS Code Marketplace stat cards -->
 	{#if data.ext.vsCodeId}
@@ -212,6 +261,12 @@
 					<div class="text-sm font-mono text-[var(--color-muted-foreground)] truncate mt-1">{data.ext.jetbrainsId}</div>
 				</div>
 			</div>
+			{#if metricRows.length > 0}
+				<div class="mt-4">{@render metricsGrid()}</div>
+			{/if}
+			<p class="mt-2 text-xs text-[var(--color-muted-foreground)]">
+				JetBrains only publishes total downloads publicly; unique downloads are not available.
+			</p>
 		</div>
 	{/if}
 
@@ -224,6 +279,7 @@
 				vsCodeHistory={data.vsCodeHistory}
 				jetbrainsHistory={data.jetbrainsHistory}
 				releases={data.releases}
+				seriesLabel={external ? `${sourceLabel} ${unit}` : undefined}
 			/>
 		{:else}
 			<p class="text-sm text-[var(--color-muted-foreground)] text-center py-16">
@@ -264,7 +320,7 @@
 					<thead>
 						<tr class="border-b border-[var(--color-border)] bg-[var(--color-muted)]">
 							<th class="px-4 py-3 text-left font-medium text-[var(--color-muted-foreground)]">Scraped at (UTC)</th>
-							<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">Open VSX DLs</th>
+							<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">{sourceLabel} {unit}</th>
 							{#if data.ext.vsCodeId}
 								<th class="px-4 py-3 text-right font-medium text-[var(--color-muted-foreground)]">VS Code installs</th>
 							{/if}

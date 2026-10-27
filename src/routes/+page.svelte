@@ -44,7 +44,8 @@
 			const matchesText =
 				!s ||
 				r.displayName.toLowerCase().includes(s) ||
-				`${r.namespace}.${r.name}`.toLowerCase().includes(s);
+				`${r.namespace}.${r.name}`.toLowerCase().includes(s) ||
+				(r.tags ?? []).some((tag) => tag.toLowerCase().includes(s));
 			const matchesTag = !t || (r.tags ?? []).some((tag) => tag.toLowerCase().includes(t));
 			return matchesText && matchesTag;
 		})

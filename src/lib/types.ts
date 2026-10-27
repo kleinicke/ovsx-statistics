@@ -66,6 +66,12 @@ export interface JetBrainsSnapshot {
 	downloadCount: number;
 }
 
+export interface SourceMetric {
+	date: string;
+	metric: string;
+	value: number;
+}
+
 export interface VersionEvent {
 	id: number;
 	date: string;
@@ -79,6 +85,7 @@ export interface ExtensionDetailJson {
 	history: OpenVsxSnapshot[];
 	vsCodeHistory: VsCodeSnapshot[];
 	jetbrainsHistory: JetBrainsSnapshot[];
+	metrics: SourceMetric[];
 	releases: VersionEvent[];
 	latest: OpenVsxSnapshot | null;
 	latestVsCode: VsCodeSnapshot | null;

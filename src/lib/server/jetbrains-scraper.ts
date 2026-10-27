@@ -2,6 +2,7 @@ import { db } from './db/index.js';
 import { extensions, jetbrainsSnapshots } from './db/schema.js';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import { fetchJson } from './http.js';
+import { saveMetrics } from './metrics.js';
 
 const JETBRAINS_API = 'https://plugins.jetbrains.com/api/plugins';
 
@@ -12,7 +13,8 @@ const JETBRAINS_PLUGINS: { namespace: string; name: string; pluginId: number }[]
 	{ namespace: 'kleinicke', name: 'ply-visualizer', pluginId: 34145 }
 ];
 
-// Daily scrape: the API only exposes the cumulative download count, so daily
+// Daily scrape: the public API only exposes the cumulative, non-unique download
+// count (unique downloads are only visible in the vendor statistics), so daily
 // numbers are derived from consecutive snapshots like for the other sources.
 export async function scrapeJetbrainsDownloads(): Promise<{ scraped: number; errors: string[] }> {
 	for (const p of JETBRAINS_PLUGINS) {
@@ -48,6 +50,12 @@ export async function scrapeJetbrainsDownloads(): Promise<{ scraped: number; err
 					target: [jetbrainsSnapshots.extensionId, jetbrainsSnapshots.date],
 					set: { downloadCount: sql`excluded.download_count`, scrapedAt: sql`excluded.scraped_at` }
 				});
+			// Per-version count of the newest release, from the updates endpoint
+			const updates = await fetchJson<{ downloads?: number }[]>(`${JETBRAINS_API}/${ext.jetbrainsId}/updates`);
+			await saveMetrics(ext.id, date, {
+				downloads: data.downloads,
+				...(typeof updates[0]?.downloads === 'number' && { version_downloads: updates[0].downloads })
+			});
 			scraped++;
 		} catch (e) {
 			errors.push(`${ext.jetbrainsId}: ${e}`);

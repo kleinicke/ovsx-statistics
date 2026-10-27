@@ -1,5 +1,5 @@
 import { createClient } from '@libsql/client/web';
-import type { ExtensionDetailJson, ExtensionRecord, JetBrainsSnapshot, OpenVsxSnapshot, VersionEvent, VsCodeSnapshot } from '../src/lib/types.js';
+import type { ExtensionDetailJson, ExtensionRecord, JetBrainsSnapshot, SourceMetric, OpenVsxSnapshot, VersionEvent, VsCodeSnapshot } from '../src/lib/types.js';
 
 const corsHeaders = (env: Env) => ({
 	'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN ?? '*',
@@ -62,7 +62,7 @@ async function getExtensionDetail(
 	if (!ext) return null;
 	ext.pinned = Boolean(ext.pinned);
 
-	const [historyResult, vsCodeResult, jetbrainsResult, releaseResult, tagResult] = await Promise.all([
+	const [historyResult, vsCodeResult, jetbrainsResult, metricsResult, releaseResult, tagResult] = await Promise.all([
 		db.execute({
 			sql: `
 				select date, scraped_at as scrapedAt, download_count as downloadCount, version
@@ -95,6 +95,10 @@ async function getExtensionDetail(
 				})
 			: Promise.resolve({ rows: [] }),
 		db.execute({
+			sql: 'select date, metric, value from source_metrics where extension_id = ? order by date asc',
+			args: [ext.id]
+		}),
+		db.execute({
 			sql: `
 				select id, date, detected_at as detectedAt, old_version as oldVersion, new_version as newVersion
 				from version_events
@@ -112,6 +116,7 @@ async function getExtensionDetail(
 	const history = historyResult.rows as unknown as OpenVsxSnapshot[];
 	const vsCodeHistory = vsCodeResult.rows as unknown as VsCodeSnapshot[];
 	const jetbrainsHistory = jetbrainsResult.rows as unknown as JetBrainsSnapshot[];
+	const metrics = metricsResult.rows as unknown as SourceMetric[];
 	const releases = releaseResult.rows as unknown as VersionEvent[];
 	const tags = tagResult.rows.map((row) => String(row.tag));
 
@@ -120,6 +125,7 @@ async function getExtensionDetail(
 		history,
 		vsCodeHistory,
 		jetbrainsHistory,
+		metrics,
 		releases,
 		latest: history.at(-1) ?? null,
 		latestVsCode: vsCodeHistory.at(-1) ?? null,

@@ -1,6 +1,7 @@
 import { desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { db } from './db/index.js';
 import { extensions, extensionTags, snapshots } from './db/schema.js';
+import { EXTERNAL_SOURCES } from '../utils.js';
 import type { LatestAllJson, LatestJson, LeaderboardRow } from '../types.js';
 
 const TOP_LIMIT = 500; // rows shipped eagerly in latest.json
@@ -75,8 +76,13 @@ export async function getLatestExports(): Promise<{ latest: LatestJson; all: Lat
 		.from(snapshots)
 		.innerJoin(extensions, eq(snapshots.extensionId, extensions.id))
 		.where(eq(snapshots.date, date))
-		.orderBy(desc(snapshots.downloadCount))
+		// External sources (Zenodo, YouTube) are not Open VSX extensions: keep them out of the ranking, at the end
+		.orderBy(
+			sql`case when ${extensions.namespace} in ${Object.keys(EXTERNAL_SOURCES)} then 1 else 0 end`,
+			desc(snapshots.downloadCount)
+		)
 		.all();
+	const externalIds = new Set(current.filter((r) => r.namespace in EXTERNAL_SOURCES).map((r) => r.id));
 
 	// Comparison dates: previous snapshot (~24h) and closest snapshot ≥7 days back
 	const prevDate = await db
@@ -103,6 +109,7 @@ export async function getLatestExports(): Promise<{ latest: LatestJson; all: Lat
 	// Previous ranking, for rank-change arrows
 	const prevRank = new Map<number, number>();
 	[...prevCounts.entries()]
+		.filter(([extensionId]) => !externalIds.has(extensionId))
 		.sort((a, b) => b[1] - a[1])
 		.forEach(([extensionId], index) => prevRank.set(extensionId, index + 1));
 
@@ -187,7 +194,7 @@ export async function getLatestExports(): Promise<{ latest: LatestJson; all: Lat
 	// Biggest gainers over the last week (falls back to 24h until a week of data exists)
 	const movers = [...fullRows]
 		.map((r) => ({ row: r, gain: r.delta7 ?? r.delta ?? 0 }))
-		.filter((m) => m.gain > 0)
+		.filter((m) => m.gain > 0 && !externalIds.has(m.row.id))
 		.sort((a, b) => b.gain - a.gain)
 		.slice(0, MOVERS_LIMIT)
 		.map((m) => m.row);
